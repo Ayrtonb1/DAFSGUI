@@ -138,8 +138,8 @@ def find_nearest(array, value):
     idx = (np.abs(array - value)).argmin()
     return array[idx]
 
-def f1_guess(fsec, I, I0, phi, beta, Ioff, abscorr):
-    f1_guess = (1/beta) * +(np.sqrt(((((I)-Ioff))/(I0*abscorr)) +((math.sin(phi)) +(beta*fsec))**2)  - (math.cos(phi)))
+def f1_guess(fsec, I, I0, phi, beta, Ioff,t, exafs, sin_theta):
+    f1_guess = (1/beta) * (-(np.sqrt(((I-Ioff)/(I0*((1 - e**((-2*exafs*t)/sin_theta)) / (2*exafs)))) - (math.sin(phi) + beta*fsec)**2))  - math.cos(phi))
     return f1_guess
 
 class MplCanvas(FigureCanvasQTAgg):
@@ -185,9 +185,9 @@ class Ui_MainWindow(QtWidgets.QMainWindow): # as opposed to default object
         self.EXAFS_button_2.setGeometry(QtCore.QRect(440, 110, 113, 32))
         self.EXAFS_button_2.setObjectName("EXAFS_button_2")
         
-        self.abscorr_button = QtWidgets.QPushButton(self.centralwidget)
-        self.abscorr_button.setGeometry(QtCore.QRect(320, 150, 113, 32))
-        self.abscorr_button.setObjectName("pushButton_6")
+        # self.abscorr_button = QtWidgets.QPushButton(self.centralwidget)
+        # self.abscorr_button.setGeometry(QtCore.QRect(320, 150, 113, 32))
+        # self.abscorr_button.setObjectName("pushButton_6")
         
         self.window_label = QtWidgets.QLabel(self.centralwidget)
         self.window_label.setGeometry(QtCore.QRect(90, 190, 50, 10))
@@ -334,7 +334,7 @@ class Ui_MainWindow(QtWidgets.QMainWindow): # as opposed to default object
         self.label_2.adjustSize() 
         self.EXAFS_button_1.setText(_translate("MainWindow", "Import"))
         self.EXAFS_button_2.setText(_translate("MainWindow", "Plot EXAFS"))
-        self.abscorr_button.setText(_translate("MainWindow", "Abs. Corr."))
+        # self.abscorr_button.setText(_translate("MainWindow", "Abs. Corr."))
         
         self.label_3.setText(_translate("MainWindow", "E<sub>edge </sub> / eV"))
         self.label_4.setText(_translate("MainWindow", "Z<sub>absorber"))
@@ -363,7 +363,7 @@ class Ui_MainWindow(QtWidgets.QMainWindow): # as opposed to default object
 
         self.save_btn.setText(_translate("MainWindow", "Save As.."))
         
-        self.abscorr_button.clicked.connect(self.abscorr)
+        # self.abscorr_button.clicked.connect(self.abscorr)
         
         self.XRD_button_1.clicked.connect(self.open_file)
         
@@ -883,15 +883,15 @@ class Ui_MainWindow(QtWidgets.QMainWindow): # as opposed to default object
         self.setCentralWidget(widget)
         self.show()
 
-        np.savetxt(str(self.filename) + '_' + str(self.dhkl) + '_model_1st_guess_and_new_abscorr',np.column_stack((self.ene,self.y_new_shift,result.best_fit,self.abscorr)))
+        np.savetxt(str(self.filename) + '_' + str(self.dhkl) + '_model_1st_guess_and_new_abscorr',np.column_stack((self.ene,self.y_new_shift,result.best_fit)))
         
     def first_guess_f1(self): #calculating f' and f" based on above fit
         
-        def f1_guess(fsec, I, I0, phi, beta, Ioff, abscorr):
-            f1_guess = (1/beta) * +(np.sqrt(((((I)-Ioff))/(I0*abscorr)) -((math.sin(phi)) +(beta*fsec))**2)  - (math.cos(phi)))
+        def f1_guess(fsec, I, I0, phi, beta, Ioff,t, exafs, sin_theta):
+            f1_guess = (1/beta) * (-(np.sqrt(((I-Ioff)/(I0*((1 - e**((-2*exafs*t)/sin_theta)) / (2*exafs)))) - (math.sin(phi) + beta*fsec)**2))  - math.cos(phi))
             return f1_guess
         
-        self.f1_minus = f1_guess(self.dkk.f2, self.y_new_shift, self.I0, self.phi, self.beta, self.Ioff, self.abscorr)
+        self.f1_minus = f1_guess(self.dkk.f2, self.y_new_shift, self.I0, self.phi, self.beta, self.Ioff, self.t,self.exafs,self.sin_theta)
         
         sc = MplCanvas(self, width=5, height=4, dpi=100)
         sc.axes.plot(self.ene_shift, self.f1_minus, label='first guess', color = 'black')
@@ -963,12 +963,20 @@ class Ui_MainWindow(QtWidgets.QMainWindow): # as opposed to default object
         np.savetxt(str(self.filename) + '_' + str(self.dhkl) + '_fsec',np.column_stack((self.ene,self.fsecond_KK, self.dkk.f2, self.dkk.fpp)))
 
     def iterate(self): #can be run as many times as desired until model converges.
-        imodel = Model(intensity, independent_vars=['en', 'fprime', 'fsec', 'abscorr'])
-        params = imodel.make_params(scale=self.I0, offset=self.Ioff, slope=0, beta=self.beta, phi=self.phi)
-        params['scale'].min = 0
+        imodel = Model(intensity, independent_vars=['en', 'fprime', 'fsec', 'exafs', 'sin_theta'])
+        params = imodel.make_params(scale=self.I0, offset=self.Ioff, slope=0, beta=self.beta, phi=self.phi, t =self.t)
+        # we can constrain parameters as desired. E.G.:
+        params['scale'].min = 0 
 
-        result = imodel.fit(self.y_new_shift, params, en=self.ene, fprime=self.f1_minus, fsec=self.fsecond_KK, abscorr = self.abscorr)
+        result = imodel.fit(self.y_new_shift, params, en=self.ene_shift, fprime=self.dkk.f1, fsec=self.dkk.f2, exafs = self.exafs, sin_theta = self.sin_theta)
         print(result.fit_report())
+
+        self.phi = result.params.get('phi').value 
+        self.beta = result.params.get('beta').value
+        self.I0 = result.params.get('scale').value
+        self.Ioff = result.params.get('offset').value
+        self.slope = result.params.get('slope')
+        self.t = result.params.get('t')
 
         sc = MplCanvas(self, width=5, height=4, dpi=100)
         sc.axes.plot(self.ene, (result.best_fit), '--', label='best fit (lmfit)', color = 'blue')
@@ -989,14 +997,9 @@ class Ui_MainWindow(QtWidgets.QMainWindow): # as opposed to default object
 
         self.show()
 
-        self.phi = result.params.get('phi').value 
-        self.beta = result.params.get('beta').value
-        self.I0 = result.params.get('scale').value
-        self.Ioff = result.params.get('offset').value
-        self.slope = result.params.get('slope')
         print(' I0 = ',self.I0, '\n','phi = ', self.phi, '\n','beta =',self.beta, '\n','Ioff =', self.Ioff, '\n','energy dependence =', self.slope)
 
-        self.f1_new = f1_guess(self.fsecond_KK, self.y_new_shift, self.I0, self.phi, self.beta, self.Ioff, self.abscorr)
+        self.f1_new = f1_guess(self.fsecond_KK, self.y_new_shift, self.I0, self.phi, self.beta, self.Ioff, self.t,self.exafs,self.sin_theta)
         i = (len(self.y_new_shift) - 1) 
 
         ene = np.array(self.ene)
